@@ -1,0 +1,7 @@
+Damage Events: 2
+
+1. Frame    0: First hit: white marker appeared at x=830
+2. Frame  192: Final hit: white marker disappeared (boss defeated)
+
+00:00
+00:06

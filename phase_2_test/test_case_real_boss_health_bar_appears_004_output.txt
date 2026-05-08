@@ -1,0 +1,9 @@
+Damage Events: 3
+
+1. Frame    0: First hit: white marker appeared at x=700
+2. Frame   16: Hit: white marker moved left by 156px (x=704→548)
+3. Frame   19: Final hit: white marker disappeared (boss defeated)
+
+00:00
+00:00
+00:00
