@@ -41,6 +41,7 @@ def run_test_case(test_dir, phase2_script):
         'test_case_real_first_hit': 1,  # Real video data
         'test_case_real_hit_002': 1,  # Real video data: one hit at frame 192
         'test_case_real_hit_003': 1,  # Real video data: one hit at frame 192
+        'test_case_real_rapid_hit_008': 1,  # Real video: one hit followed by white flicker false positives
     }
     
     expected_events = expected_map.get(test_name, -1)

@@ -63,9 +63,10 @@ def find_white_marker_position(frame_rgb):
     g = frame_rgb[:, :, 1].astype(np.float32)
     b = frame_rgb[:, :, 2].astype(np.float32)
     
-    # White marker: R, G, B all bright and approximately equal
-    # Use: R > 180 AND G > 180 AND B > 180 (conservative to avoid noise)
-    white_mask = (r > 180) & (g > 180) & (b > 180)
+    # White marker: R, G, B all bright. After a hit the marker develops a yellow
+    # tint from the damage indicator animation (B drops to ~160-176). Use a lower
+    # B threshold (140) while keeping R and G strict to avoid false positives.
+    white_mask = (r > 180) & (g > 180) & (b > 140)
     
     # Find columns that contain white pixels
     white_cols = np.where(white_mask.any(axis=0))[0]
@@ -136,6 +137,7 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
     
     state = 1  # State 1: Pre-Boss
     prev_position = None
+    last_gap = None            # Structural gap (white_pos - bar_right) when both visible
     pending_final_hit = None   # Deferred final_hit pending intermission confirmation
     post_intermission = False  # True when returning to State 2 after a phase transition
     
@@ -158,6 +160,9 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                     # Jump directly to active combat tracking without recording an event.
                     state = 3
                     prev_position = white_pos
+                    bar_right_init = bar_extent[1]
+                    if 0 < bar_right_init < white_pos and (white_pos - bar_right_init) < 30:
+                        last_gap = white_pos - bar_right_init
                     if debug:
                         print(f"Frame {idx}: STATE 1→3 (MID-COMBAT START) - bar x={bar_extent[0]}–{bar_extent[1]}, marker x={white_pos}")
                 else:
@@ -175,6 +180,10 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
             elif white_present:
                 state = 3
                 prev_position = white_pos
+                if bar_extent:
+                    bar_right_s2 = bar_extent[1]
+                    if 0 < bar_right_s2 < white_pos and (white_pos - bar_right_s2) < 30:
+                        last_gap = white_pos - bar_right_s2
                 if post_intermission:
                     # White reappeared after intermission — resume silently, no event
                     post_intermission = False
@@ -233,23 +242,30 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                             if debug:
                                 print(f"Frame {idx}: HEAL +{abs(change)}px (x={prev_position}→{white_pos})")
                 prev_position = white_pos
+                if bar_extent:
+                    bar_right_cur = bar_extent[1]
+                    if 0 < bar_right_cur < white_pos and (white_pos - bar_right_cur) < 30:
+                        last_gap = white_pos - bar_right_cur
             elif bar_present and prev_position is not None:
                 # White marker vanished but bar still present.
-                # If bar right edge dropped significantly below the last known marker position,
-                # the boss took a hit that momentarily hid the marker.
+                # The raw drop (prev_position - bar_right) includes the structural gap between
+                # the white marker and the bar's right edge. Subtract last_gap to get the
+                # actual bar movement; only record a hit if the bar genuinely moved.
                 bar_right = bar_extent[1]
-                drop = prev_position - bar_right
-                if drop >= 10:
+                raw_drop = prev_position - bar_right
+                gap = last_gap if last_gap is not None else 0
+                adjusted_drop = raw_drop - gap
+                if adjusted_drop >= 10:
                     hits.append({
                         'frame': idx,
                         'type': 'hit',
                         'position_before': prev_position,
                         'position_after': bar_right,
-                        'pixel_change': drop,
-                        'description': f'Hit: bar dropped by {drop}px while marker hidden (bar right x={bar_right})'
+                        'pixel_change': adjusted_drop,
+                        'description': f'Hit: bar dropped by {adjusted_drop}px while marker hidden (bar right x={bar_right})'
                     })
                     if debug:
-                        print(f"Frame {idx}: HIT (marker hidden) -{drop}px (bar right={bar_right})")
+                        print(f"Frame {idx}: HIT (marker hidden) -{adjusted_drop}px (bar right={bar_right}, raw={raw_drop}, gap={gap})")
                     prev_position = bar_right
         
         elif state == 4:  # Defeated: No further events
