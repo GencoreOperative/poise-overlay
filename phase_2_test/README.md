@@ -109,7 +109,8 @@ In addition to synthetic cases, the suite includes real video test cases extract
 - `test_case_real_false_negative_01_24_006` - Real detection edge case
 - `test_case_real_false_positive_01_03_005` - Real false positive test
 - `test_case_real_false_positive_02_15_02_17_007` - Real false positive test
-- `test_case_real_hit_001`, `002`, `003` - Real individual hits
+- `test_case_real_first_hit` - Real first hit scenario
+- `test_case_real_hit_002`, `test_case_real_hit_003` - Real individual hits
 
 These provide validation against actual video artifacts (compression, color variations, etc.).
 

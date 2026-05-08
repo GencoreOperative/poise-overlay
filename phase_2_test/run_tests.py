@@ -37,7 +37,7 @@ def run_test_case(test_dir, phase2_script):
         'test_case_real_false_negative_01_24_006': 3,  # Real video data
         'test_case_real_false_positive_01_03_005': 1,  # Real video data
         'test_case_real_false_positive_02_15_02_17_007': 1,  # Real video data
-        'test_case_real_hit_001': 1,  # Real video data
+        'test_case_real_first_hit': 1,  # Real video data
         'test_case_real_hit_002': 2,  # Real video data
         'test_case_real_hit_003': 2,  # Real video data
     }
