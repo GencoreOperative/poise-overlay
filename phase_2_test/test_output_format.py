@@ -2,7 +2,7 @@
 """
 Functional Test: Phase 2 Output Format Validation
 
-Ensures that phase2-detect-hits-v3-white-marker.py outputs in the correct
+Ensures that phase2-detect-hits.py outputs in the correct
 format: one MM:SS timestamp per line, one for each hit detected.
 """
 
@@ -23,7 +23,7 @@ def test_output_format():
     print(f"Testing output format on {test_case}...")
     
     # Run phase 2
-    cmd = ['python3', '../phase2-detect-hits-v3-white-marker.py', test_case]
+    cmd = ['python3', '../phase2-detect-hits.py', test_case]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     
     # Extract MM:SS timestamps (everything that looks like MM:SS)
@@ -72,7 +72,7 @@ def test_multiple_hits():
     
     print(f"\nTesting on {test_case}...")
     
-    cmd = ['python3', '../phase2-detect-hits-v3-white-marker.py', test_case]
+    cmd = ['python3', '../phase2-detect-hits.py', test_case]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     
     output_lines = result.stdout.strip().split('\n')

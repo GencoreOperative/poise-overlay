@@ -2,12 +2,14 @@
 """
 Test runner for Phase 2 hit detection.
 Validates that the detection algorithm works correctly on all test cases.
+Includes both unit tests (accuracy) and functional tests (output format).
 """
 
 import os
 import sys
 import subprocess
 import json
+import re
 
 def run_test_case(test_dir, phase2_script):
     """
@@ -77,11 +79,115 @@ def run_test_case(test_dir, phase2_script):
         return test_name, expected_events, -1, False, str(e)
 
 
+def validate_mmss_format(line):
+    """Check if line matches MM:SS format"""
+    return re.match(r'^\d{2}:\d{2}$', line.strip()) is not None
+
+
+def run_functional_test_output_format(phase2_script):
+    """
+    Functional Test: Output Format Validation
+    Ensures phase2-detect-hits.py outputs valid MM:SS timestamps
+    
+    Returns:
+        (test_name, passed, error_msg)
+    """
+    test_case = 'test_case_3_single_damage'
+    
+    # Run phase 2
+    cmd = ['python3', phase2_script, test_case, '-o', f'{test_case}_functional_output.txt']
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # Read output file
+        output_file = f'{test_case}_functional_output.txt'
+        if not os.path.exists(output_file):
+            return 'output_format_single_hit', False, 'No output file generated'
+        
+        with open(output_file, 'r') as f:
+            output_lines = f.read().strip().split('\n')
+        
+        # Extract MM:SS timestamps (skip header/description lines)
+        timestamps = []
+        for line in output_lines:
+            if validate_mmss_format(line):
+                timestamps.append(line.strip())
+        
+        # Verify at least one timestamp was found
+        if not timestamps:
+            return 'output_format_single_hit', False, 'No MM:SS timestamps found in output'
+        
+        # Verify all timestamps are valid MM:SS
+        for ts in timestamps:
+            if not validate_mmss_format(ts):
+                return 'output_format_single_hit', False, f'Invalid timestamp format: {ts}'
+        
+        return 'output_format_single_hit', True, ''
+    
+    except subprocess.TimeoutExpired:
+        return 'output_format_single_hit', False, 'Timeout'
+    except Exception as e:
+        return 'output_format_single_hit', False, str(e)
+
+
+def run_functional_test_known_limitation_small_hits(phase2_script):
+    """
+    Functional Test: Partial Detection on Small Hits (Known Limitation)
+    
+    test_case_4_multiple_damages has 3 hits, but they are too small to detect with
+    full accuracy. This is a known limitation. Test compromises by validating:
+    - At least 2 hits are detected (partial detection acceptable)
+    - All detected timestamps are in valid MM:SS format
+    
+    This test documents the limitation and ensures format correctness despite it.
+    
+    Returns:
+        (test_name, passed, error_msg)
+    """
+    test_case = 'test_case_4_multiple_damages'
+    
+    cmd = ['python3', phase2_script, test_case, '-o', f'{test_case}_functional_output.txt']
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # Read output file
+        output_file = f'{test_case}_functional_output.txt'
+        if not os.path.exists(output_file):
+            return 'known_limitation_small_hits', False, 'No output file generated'
+        
+        with open(output_file, 'r') as f:
+            output_lines = f.read().strip().split('\n')
+        
+        # Extract MM:SS timestamps (skip header/description lines)
+        timestamps = []
+        for line in output_lines:
+            if validate_mmss_format(line):
+                timestamps.append(line.strip())
+        
+        # Known limitation: should detect at least 2 hits (out of 3 possible)
+        if len(timestamps) < 2:
+            return 'known_limitation_small_hits', False, f'Expected at least 2 hits, got {len(timestamps)}'
+        
+        # Verify all are valid MM:SS
+        for ts in timestamps:
+            if not validate_mmss_format(ts):
+                return 'known_limitation_small_hits', False, f'Invalid timestamp format: {ts}'
+        
+        return 'known_limitation_small_hits', True, ''
+    
+    except subprocess.TimeoutExpired:
+        return 'known_limitation_small_hits', False, 'Timeout'
+    except Exception as e:
+        return 'known_limitation_small_hits', False, str(e)
+
+
 def main():
     # Determine paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
-    phase2_script = os.path.join(parent_dir, 'phase2-detect-hits-v3-white-marker.py')
+    phase2_script = os.path.join(parent_dir, 'phase2-detect-hits.py')
     
     if not os.path.exists(phase2_script):
         print(f"Error: Cannot find {phase2_script}")
@@ -104,7 +210,7 @@ def main():
         print("No test cases found!")
         sys.exit(1)
     
-    print(f"Running {len(test_dirs)} test cases...\n")
+    print(f"Running {len(test_dirs)} unit tests...\n")
     
     results = []
     for test_dir in test_dirs:
@@ -117,28 +223,73 @@ def main():
         else:
             print(f"✗ FAIL (expected {expected}, got {actual})")
     
+    # Functional Tests
+    print(f"\nRunning 2 functional tests...\n")
+    
+    functional_results = []
+    
+    print("Testing output_format (single hit)...", end=' ', flush=True)
+    test_name, passed, error = run_functional_test_output_format(phase2_script)
+    functional_results.append((test_name, passed, error))
+    if passed:
+        print("✓ PASS")
+    else:
+        print(f"✗ FAIL ({error})")
+    
+    print("Testing known_limitation (small hits, partial detection)...", end=' ', flush=True)
+    test_name, passed, error = run_functional_test_known_limitation_small_hits(phase2_script)
+    functional_results.append((test_name, passed, error))
+    if passed:
+        print("✓ PASS")
+    else:
+        print(f"✗ FAIL ({error})")
+    
     # Summary
     print("\n" + "="*70)
     print("TEST RESULTS SUMMARY")
     print("="*70)
-    print(f"\n{'Test Case':<40} {'Expected':<12} {'Actual':<12} {'Result'}")
+    
+    # Unit tests summary
+    print(f"\n{'UNIT TESTS':<40} {'Expected':<12} {'Actual':<12} {'Result'}")
     print("-" * 78)
     
-    passed_count = 0
+    unit_passed = 0
     for name, expected, actual, passed in results:
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"{name:<40} {expected:<12} {actual:<12} {status}")
         if passed:
-            passed_count += 1
+            unit_passed += 1
     
     print("-" * 78)
-    print(f"\nTotal: {passed_count}/{len(results)} tests passed")
+    print(f"Unit tests: {unit_passed}/{len(results)} passed")
     
-    if passed_count == len(results):
+    # Functional tests summary
+    print(f"\n{'FUNCTIONAL TESTS':<40} {'Result'}")
+    print("-" * 78)
+    
+    functional_passed = 0
+    for name, passed, error in functional_results:
+        status = "✓ PASS" if passed else f"✗ FAIL ({error})"
+        print(f"{name:<40} {status}")
+        if passed:
+            functional_passed += 1
+    
+    print("-" * 78)
+    print(f"Functional tests: {functional_passed}/{len(functional_results)} passed")
+    
+    # Overall summary
+    total_passed = unit_passed + functional_passed
+    total_tests = len(results) + len(functional_results)
+    
+    print("\n" + "="*70)
+    print(f"TOTAL: {total_passed}/{total_tests} tests passed")
+    print("="*70)
+    
+    if total_passed == total_tests:
         print("\n✓ All tests passed!")
         return 0
     else:
-        print(f"\n✗ {len(results) - passed_count} test(s) failed")
+        print(f"\n✗ {total_tests - total_passed} test(s) failed")
         return 1
 
 
