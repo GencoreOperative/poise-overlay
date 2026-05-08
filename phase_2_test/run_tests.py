@@ -28,18 +28,19 @@ def run_test_case(test_dir, phase2_script):
         'test_case_2_entrance_animation': 0,  # Bar appears, first white marker = no hit counted yet
         'test_case_3_single_damage': 1,  # Single damage event
         'test_case_5_boss_healing': 1,  # First damage only (healing not counted)
-        'test_case_6_death_animation': 3,  # Multiple damage events as health depletes
+        'test_case_6_death_animation': 2,  # Mid-combat start: one hit + final_hit
         'test_case_7_damage_threshold': 2,  # Two separate damage events
         'test_case_8_complex_scenario': 3,  # Three rapid damages
         # Real test cases (from actual videos)
-        'test_case_4_multiple_damages': 3,  # Real video data
-        'test_case_real_boss_health_bar_appears_004': 3,  # Real video data
-        'test_case_real_false_negative_01_24_006': 3,  # Real video data
-        'test_case_real_false_positive_01_03_005': 1,  # Real video data
-        'test_case_real_false_positive_02_15_02_17_007': 1,  # Real video data
+        'test_case_4_multiple_damages': 4,  # Real video data
+        'test_case_real_boss_health_bar_appears_004': 0,  # Real video: health bar appears, no actual hits
+        'test_case_real_false_negative_01_24_006': 2,  # Mid-combat start: two genuine hits
+        'test_case_real_intermission': 1,  # Phase transition: one hit in Phase 1, intermission, Phase 2 no hits
+        'test_case_real_false_positive_01_03_005': 0,  # Real video data: no hits occur
+        'test_case_real_false_positive_02_15_02_17_007': 0,  # Real video data: no hits occur
         'test_case_real_first_hit': 1,  # Real video data
-        'test_case_real_hit_002': 2,  # Real video data
-        'test_case_real_hit_003': 2,  # Real video data
+        'test_case_real_hit_002': 1,  # Real video data: one hit at frame 192
+        'test_case_real_hit_003': 1,  # Real video data: one hit at frame 192
     }
     
     expected_events = expected_map.get(test_name, -1)
