@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""
+Phase 2: Hit Detection using White Marker State Machine
+
+This algorithm tracks the Elden Ring boss health bar white marker (the boundary
+between undamaged and damaged health) across frames to detect and measure damage
+events and healing.
+
+State Machine:
+  State 1 (Pre-Boss): Miscellaneous pixels, no red bar visible.
+    → Transition to State 2 when red bar detected (no white marker). No event.
+    → Transition to State 3 when red bar AND white marker both detected (mid-combat clip). No event.
+
+  State 2 (Bar Visible, Not Yet Hit): Red bar present, no white marker.
+    → Boss is at full health and has not been damaged yet (or bar just returned after intermission).
+    → Transition to State 3 when white marker appears. Records "first_hit".
+
+  State 3 (Active Combat): Red bar and white marker both present.
+    → Track rightmost white pixel position.
+    → Position moving left = damage event ("hit").
+    → Position moving right = healing event ("heal").
+    → Both disappear → Transition to State 5 (Monitoring). Deferred "final_hit".
+
+  State 4 (Defeated): Boss health depleted, bar and marker gone.
+    → No further events processed.
+
+  State 5 (Monitoring): Both bar and white marker gone — awaiting outcome.
+    → Bar reappears → Intermission confirmed. Discard pending final_hit. Back to State 2 or 3.
+    → Clip ends with no bar → Commit deferred "final_hit". Transition to State 4.
+
+Critical rule: White marker detection only begins after the red bar is confirmed.
+Pre-boss frames may contain white pixels from game scenery/UI — these must be ignored.
+
+Usage:
+  python3 phase2-detect-hits.py <input_dir> [-o OUTPUT_FILE] [--debug]
+
+  <input_dir>: Directory with frame_XXXXXX.png files (cropped 1000px × 7px health bars)
+  -o OUTPUT_FILE: Write hit events to file (default: stdout)
+  --debug: Print detailed state machine trace
+"""
+
+import os
+import sys
+import argparse
+from PIL import Image
+import numpy as np
+from collections import defaultdict
+
+
+def find_white_marker_position(frame_rgb):
+    """
+    Find rightmost white pixel in health bar frame (rightmost edge of white marker).
+    
+    Works with both full-frame video and pre-cropped health bar images.
+    
+    Args:
+        frame_rgb: numpy array of shape (height, width, 3) with RGB values
+    
+    Returns:
+        int: x-coordinate of rightmost white pixel (relative to crop), or None if not found
+    """
+    r = frame_rgb[:, :, 0].astype(np.float32)
+    g = frame_rgb[:, :, 1].astype(np.float32)
+    b = frame_rgb[:, :, 2].astype(np.float32)
+    
+    # White marker: R, G, B all bright and approximately equal
+    # Use: R > 180 AND G > 180 AND B > 180 (conservative to avoid noise)
+    white_mask = (r > 180) & (g > 180) & (b > 180)
+    
+    # Find columns that contain white pixels
+    white_cols = np.where(white_mask.any(axis=0))[0]
+    
+    if len(white_cols) > 0:
+        return int(white_cols[-1])  # Rightmost white pixel
+    return None
+
+
+def find_bar_extent(frame_rgb):
+    """
+    Find extent of red health bar (left and right edges).
+    Used to detect State 1 (full red bar) vs bar being present but damaged.
+    
+    Args:
+        frame_rgb: numpy array of shape (height, width, 3)
+    
+    Returns:
+        tuple: (left_x, right_x) or None if bar not found
+    """
+    r = frame_rgb[:, :, 0].astype(np.float32)
+    g = frame_rgb[:, :, 1].astype(np.float32)
+    b = frame_rgb[:, :, 2].astype(np.float32)
+    
+    # Red pixels: R high, G and B low (capturing both bright and dark red)
+    red_mask = (r > 60) & (g < 30) & (b < 30)
+    
+    red_cols = np.where(red_mask.any(axis=0))[0]
+    
+    # Boss health bar always anchors to the left edge of the frame.
+    # Pre-boss game elements (UI, scenery) that happen to contain red pixels
+    # appear well into the frame. Only accept bars starting within 10px of x=0.
+    if len(red_cols) > 0 and red_cols[0] <= 10:
+        return (int(red_cols[0]), int(red_cols[-1]))
+    return None
+
+
+def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
+    """
+    Analyze health bar frames using white marker state machine.
+    
+    Args:
+        frame_dir: Directory containing frame_XXXXXX.png files
+        max_frames: Maximum frames to process (None = all)
+        debug: Print detailed trace
+    
+    Returns:
+        list: Hit events with (frame_num, position_before, position_after, pixel_change)
+    """
+    # Collect frames
+    frames = []
+    for f in sorted(os.listdir(frame_dir)):
+        if f.startswith('frame_') and f.endswith('.png'):
+            frames.append(f)
+            if max_frames and len(frames) >= max_frames:
+                break
+    
+    if not frames:
+        raise ValueError(f"No frames found in {frame_dir}")
+    
+    if debug:
+        print(f"Found {len(frames)} frames")
+    
+    # Track states
+    states = []  # List of (frame_num, state)
+    positions = []  # List of (frame_num, white_marker_x or None)
+    hits = []  # List of hit events
+    
+    state = 1  # State 1: Pre-Boss
+    prev_position = None
+    pending_final_hit = None   # Deferred final_hit pending intermission confirmation
+    post_intermission = False  # True when returning to State 2 after a phase transition
+    
+    for idx, frame_file in enumerate(frames):
+        frame_path = os.path.join(frame_dir, frame_file)
+        frame_img = Image.open(frame_path).convert('RGB')
+        frame_rgb = np.array(frame_img)
+        
+        white_pos = find_white_marker_position(frame_rgb)
+        bar_extent = find_bar_extent(frame_rgb)
+        
+        bar_present = bar_extent is not None
+        white_present = white_pos is not None
+        
+        # State transitions and event detection
+        if state == 1:  # Pre-Boss: Waiting for red bar
+            if bar_present:
+                if white_present:
+                    # Bar and marker both already visible — clip started mid-combat.
+                    # Jump directly to active combat tracking without recording an event.
+                    state = 3
+                    prev_position = white_pos
+                    if debug:
+                        print(f"Frame {idx}: STATE 1→3 (MID-COMBAT START) - bar x={bar_extent[0]}–{bar_extent[1]}, marker x={white_pos}")
+                else:
+                    state = 2
+                    if debug:
+                        print(f"Frame {idx}: STATE 1→2 (BAR APPEARED) - red bar x={bar_extent[0]}–{bar_extent[1]}")
+        
+        elif state == 2:  # Bar visible, not yet hit: Waiting for white marker
+            if not bar_present:
+                # Bar vanished before any hit — back to pre-boss
+                state = 1
+                post_intermission = False
+                if debug:
+                    print(f"Frame {idx}: STATE 2→1 (BAR VANISHED, no hits)")
+            elif white_present:
+                state = 3
+                prev_position = white_pos
+                if post_intermission:
+                    # White reappeared after intermission — resume silently, no event
+                    post_intermission = False
+                    if debug:
+                        print(f"Frame {idx}: STATE 2→3 (POST-INTERMISSION RESUME) - marker at x={white_pos}, no event")
+                else:
+                    # White marker appeared for the first time — genuine first hit
+                    post_intermission = False
+                    hits.append({
+                        'frame': idx,
+                        'type': 'first_hit',
+                        'position': white_pos,
+                        'pixel_change': None,
+                        'description': f'First hit: white marker appeared at x={white_pos}'
+                    })
+                    if debug:
+                        print(f"Frame {idx}: STATE 2→3 (FIRST HIT) - white marker at x={white_pos}")
+        
+        elif state == 3:  # Active Combat: Track white marker movement
+            if not bar_present and not white_present:
+                # Both gone — could be defeat or phase transition. Defer the event.
+                state = 5
+                pending_final_hit = {
+                    'frame': idx,
+                    'type': 'final_hit',
+                    'position': None,
+                    'pixel_change': None,
+                    'description': f'Final hit: white marker and red bar disappeared (boss defeated)'
+                }
+                if debug:
+                    print(f"Frame {idx}: STATE 3→5 (MONITORING) - bar and marker gone, awaiting outcome")
+            elif white_present:
+                if prev_position is not None:
+                    change = prev_position - white_pos  # Positive = moved left = damage
+                    if abs(change) >= 3:
+                        if change > 0:
+                            hits.append({
+                                'frame': idx,
+                                'type': 'hit',
+                                'position_before': prev_position,
+                                'position_after': white_pos,
+                                'pixel_change': change,
+                                'description': f'Hit: white marker moved left by {change}px (x={prev_position}→{white_pos})'
+                            })
+                            if debug:
+                                print(f"Frame {idx}: HIT -{change}px (x={prev_position}→{white_pos})")
+                        else:
+                            hits.append({
+                                'frame': idx,
+                                'type': 'heal',
+                                'position_before': prev_position,
+                                'position_after': white_pos,
+                                'pixel_change': change,
+                                'description': f'Healing: white marker moved right by {abs(change)}px (x={prev_position}→{white_pos})'
+                            })
+                            if debug:
+                                print(f"Frame {idx}: HEAL +{abs(change)}px (x={prev_position}→{white_pos})")
+                prev_position = white_pos
+            elif bar_present and prev_position is not None:
+                # White marker vanished but bar still present.
+                # If bar right edge dropped significantly below the last known marker position,
+                # the boss took a hit that momentarily hid the marker.
+                bar_right = bar_extent[1]
+                drop = prev_position - bar_right
+                if drop >= 10:
+                    hits.append({
+                        'frame': idx,
+                        'type': 'hit',
+                        'position_before': prev_position,
+                        'position_after': bar_right,
+                        'pixel_change': drop,
+                        'description': f'Hit: bar dropped by {drop}px while marker hidden (bar right x={bar_right})'
+                    })
+                    if debug:
+                        print(f"Frame {idx}: HIT (marker hidden) -{drop}px (bar right={bar_right})")
+                    prev_position = bar_right
+        
+        elif state == 4:  # Defeated: No further events
+            if debug:
+                print(f"Frame {idx}: STATE 4 (DEFEATED) - ignoring")
+        
+        elif state == 5:  # Monitoring: Both bar and white gone — awaiting outcome
+            if bar_present:
+                # Bar returned — this was a phase transition (intermission), not a defeat.
+                # Discard the pending final_hit and resume tracking.
+                pending_final_hit = None
+                if white_present:
+                    # Bar and white both back — resume active combat silently
+                    state = 3
+                    prev_position = white_pos
+                    if debug:
+                        print(f"Frame {idx}: STATE 5→3 (INTERMISSION CONFIRMED) - bar and marker back, prev={white_pos}")
+                else:
+                    # Bar returned, white not yet present — wait for it
+                    state = 2
+                    post_intermission = True
+                    prev_position = None
+                    if debug:
+                        print(f"Frame {idx}: STATE 5→2 (INTERMISSION CONFIRMED) - bar back, waiting for marker")
+        
+        states.append((idx, state))
+        positions.append((idx, white_pos))
+    
+    # If clip ended while monitoring (both bar and white gone and never returned),
+    # commit the deferred final_hit — the boss was genuinely defeated.
+    if state == 5 and pending_final_hit is not None:
+        hits.append(pending_final_hit)
+        if debug:
+            print(f"Clip ended in STATE 5 — committing deferred final_hit at frame {pending_final_hit['frame']}")
+    
+    return hits, states, positions
+
+
+def frame_to_mmss(frame_num, fps=30):
+    """Convert frame number to MM:SS format at given frame rate."""
+    seconds = frame_num / fps
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_output(hits):
+    """Format hits for display. Only output damage events (hits + first/final), not heals.
+    
+    Output format:
+      Line 1: "Damage Events: N"
+      Line 2: (blank)
+      Lines 3+: Detailed hit descriptions (for human review)
+      Final section: MM:SS timestamps (one per line, for processing)
+    """
+    # Count only damage events (first_hit, hit, final_hit), not heals
+    damage_events = [h for h in hits if h['type'] in ('hit', 'first_hit', 'final_hit')]
+    
+    output = [f"Damage Events: {len(damage_events)}"]
+    output.append("")
+    
+    if damage_events:
+        for i, event in enumerate(damage_events, 1):
+            output.append(f"{i}. Frame {event['frame']:4d}: {event['description']}")
+    
+    # Add MM:SS timestamps for each hit (one per line)
+    output.append("")
+    for event in damage_events:
+        output.append(frame_to_mmss(event['frame']))
+    
+    return '\n'.join(output)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Detect boss health bar hits using white marker state machine'
+    )
+    parser.add_argument('input_dir', help='Directory with frame PNG files')
+    parser.add_argument('-o', '--output', help='Output file (default: stdout)')
+    parser.add_argument('--debug', action='store_true', help='Print debug trace')
+    parser.add_argument('--max-frames', type=int, help='Process only first N frames')
+    
+    args = parser.parse_args()
+    
+    if not os.path.isdir(args.input_dir):
+        print(f"Error: {args.input_dir} is not a directory", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        hits, states, positions = analyze_health_sequence(
+            args.input_dir,
+            max_frames=args.max_frames,
+            debug=args.debug
+        )
+    except Exception as e:
+        print(f"Error analyzing frames: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Count hits
+    hit_count = sum(1 for h in hits if h['type'] == 'hit')
+    first_count = sum(1 for h in hits if h['type'] == 'first_hit')
+    final_count = sum(1 for h in hits if h['type'] == 'final_hit')
+    damage_count = hit_count + first_count + final_count
+    
+    # Format output
+    output = format_output(hits)
+    
+    # Write output
+    if args.output:
+        with open(args.output, 'w') as f:
+            f.write(output)
+    else:
+        print(output)
+    
+    # Summary
+    if args.output:
+        print(f"Results written to {args.output}")
+    print(f"\nSummary: {damage_count} total damage events ({first_count} first, {hit_count} mid, {final_count} final)")
+
+
+if __name__ == '__main__':
+    main()
