@@ -1,102 +1,163 @@
 # Phase 2 Test Suite: Hit Detection
 
-This test suite validates the Phase 2 hit detection algorithm by using synthetic test cases that exercise specific behaviors.
+This test suite validates the Phase 2 hit detection algorithm using:
+- **Synthetic test cases** (programmatically generated, fully controlled)
+- **Real video test cases** (extracted from actual gameplay)
 
-## Test Cases
+---
 
-### test_case_1_pre_boss
-- **Description**: Pre-boss gameplay (no health bar visible)
-- **Frames**: 50 black frames (no red pixels)
-- **Expected Events**: 0
-- **Purpose**: Verify that pre-boss frames don't trigger false events
+## Quick Start
 
-### test_case_2_entrance_animation
-- **Description**: Boss entrance animation with health bar flickering
-- **Structure**:
-  - 60 frames: Health bar flickering (300-800 pixels, unstable)
-  - 60 frames: Health bar stabilization at 989 pixels
-- **Expected Events**: 0
-- **Purpose**: Verify that entrance animation and stabilization don't trigger false damage/heal events
-
-### test_case_3_single_damage
-- **Description**: Single damage event in stable gameplay
-- **Structure**:
-  - 50 frames: Full health (989)
-  - 3 frames: Damage animation (989 → 750)
-  - 50 frames: Damaged health (750)
-- **Expected Events**: 1
-- **Purpose**: Verify single damage detection
-
-### test_case_4_multiple_damages
-- **Description**: Three sequential damage events
-- **Structure**:
-  - 50 frames @ 989, damage → 800, 50 @ 800
-  - 50 frames @ 800, damage → 650, 50 @ 650
-  - 50 frames @ 650, damage → 500, 50 @ 500
-- **Expected Events**: 3
-- **Purpose**: Verify multiple damage detection with proper spacing
-
-### test_case_5_boss_healing
-- **Description**: Boss takes damage then heals
-- **Structure**:
-  - 10 black frames (pre-boss)
-  - 42 frames: Entrance animation
-  - 50 frames: Stabilization at 989
-  - 3 frames: Damage (989 → 750)
-  - 50 frames: At 750
-  - 4 frames: Heal (750 → 989)
-  - 50 frames: At 989
-- **Expected Events**: 2 (damage + heal)
-- **Purpose**: Verify boss healing detection
-
-### test_case_6_death_animation
-- **Description**: Boss death animation with health bar disappearing
-- **Structure**:
-  - 50 frames: Full health (989)
-  - 3 frames: Final damage (989 → 100)
-  - 12 frames: Death animation (flickering 0-400)
-  - 20 frames: Black (health bar gone)
-- **Expected Events**: 1
-- **Purpose**: Verify that death animation doesn't create spurious events
-
-### test_case_7_damage_threshold
-- **Description**: Test damage threshold filtering
-- **Structure**:
-  - 50 frames: Full health (989)
-  - 3 frames: Small damage (989 → 950, 40px - below threshold)
-  - 50 frames: At 950
-  - 3 frames: Large damage (950 → 840, 110px - above threshold)
-  - 50 frames: At 840
-- **Expected Events**: 1 (only the large damage)
-- **Purpose**: Verify that small damage below threshold is ignored
-
-### test_case_8_complex_scenario
-- **Description**: Real-world complex scenario with all elements
-- **Structure**:
-  - 10 black frames (pre-boss)
-  - 42 frames: Entrance animation
-  - 50 frames: Stabilization at 989
-  - 3 hits: 989→800, 800→700, 700→650 (with 20 frame stable periods between)
-  - 4 frames: Boss heal (650 → 989)
-  - 20 frames: At 989
-  - 10 frames: Death animation
-  - 20 black frames
-- **Expected Events**: 4 (3 damage + 1 heal)
-- **Purpose**: Test the algorithm on a realistic combat scenario
-
-## Running the Tests
-
-### Generate all test cases:
+### Generate or regenerate synthetic test cases:
 ```bash
-python3 test_case_generator.py
+python3 synthetic_test_generator.py
+```
+This creates 7 synthetic test cases in the current directory with controlled frame sequences.
+
+### Run the full test suite:
+```bash
+python3 run_tests.py
+```
+This runs:
+- 15 unit tests (accuracy on all test cases)
+- 2 functional tests (output format validation)
+
+Expected output:
+```
+✓ 17/17 tests passed
 ```
 
-### Run the test suite:
+---
+
+## Synthetic Test Case Generator
+
+**File:** `synthetic_test_generator.py`
+
+Programmatically creates realistic but fully-controlled health bar frame sequences for testing specific edge cases.
+
+### Generated Test Cases
+
+Each test case consists of a directory with PNG frames (7px tall × 999px wide) showing health bar states.
+
+#### test_case_1_pre_boss
+- **Description**: Pre-boss gameplay (no health bar visible)
+- **Frames**: 50 frames with background only
+- **Expected Events**: 0
+- **Purpose**: Verify pre-boss frames don't trigger false events
+
+#### test_case_2_entrance_animation
+- **Description**: Boss bar appears (health bar transition)
+- **Frames**: 1 empty frame, then 49 frames at full health (999px)
+- **Expected Events**: 0
+- **Purpose**: Verify entrance doesn't count as damage
+
+#### test_case_3_single_damage
+- **Description**: Single damage event
+- **Frames**: 10 frames at full health (999px), then 10 frames at damaged (950px)
+- **Expected Events**: 1
+- **Purpose**: Verify basic hit detection
+
+#### test_case_5_boss_healing
+- **Description**: Damage followed by healing
+- **Frames**: Full (999) → Damaged (800) → Healed (900)
+- **Expected Events**: 1
+- **Purpose**: Verify damage detection and healing handling
+
+#### test_case_6_death_animation
+- **Description**: Progressive health depletion to zero
+- **Frames**: 100px → 50px → 0px (final hit)
+- **Expected Events**: Multiple (health decreases)
+- **Purpose**: Verify final hit detection without spurious events
+
+#### test_case_7_damage_threshold
+- **Description**: Tests damage threshold filtering
+- **Frames**: Full (999) → Small damage (996, 3px) → Large damage (950, 46px)
+- **Expected Events**: 2
+- **Purpose**: Verify threshold detection
+
+#### test_case_8_complex_scenario
+- **Description**: Multiple rapid hits with varying magnitudes
+- **Frames**: 999 → 850 → 700 → 500px
+- **Expected Events**: 3
+- **Purpose**: Test algorithm on realistic multi-hit scenario
+
+### Why Synthetic Tests?
+
+- **Reproducible**: Same frames every time, no video compression artifacts
+- **Controlled**: Exact pixel positions, no ambiguity
+- **Fast**: No video processing needed
+- **Targeted**: Each case tests a specific edge case
+- **Automatable**: Can be regenerated and validated in CI/CD
+
+### Regenerating Tests
+
+If you modify the test case generation logic (e.g., to change thresholds or health bar widths), regenerate:
+
+```bash
+python3 synthetic_test_generator.py
+```
+
+This deletes old frames and creates fresh ones. Run `python3 run_tests.py` to validate.
+
+---
+
+## Real Video Test Cases
+
+In addition to synthetic cases, the suite includes real video test cases extracted from actual gameplay:
+- `test_case_4_multiple_damages` - 3 sequential hits from real combat
+- `test_case_real_boss_health_bar_appears_004` - Real entrance animation
+- `test_case_real_false_negative_01_24_006` - Real detection edge case
+- `test_case_real_false_positive_01_03_005` - Real false positive test
+- `test_case_real_false_positive_02_15_02_17_007` - Real false positive test
+- `test_case_real_hit_001`, `002`, `003` - Real individual hits
+
+These provide validation against actual video artifacts (compression, color variations, etc.).
+
+---
+
+## Test Suite Output
+
+### Running Tests
+
 ```bash
 python3 run_tests.py
 ```
 
-This will execute phase2-detect-hits-v2-white-strip.py on each test case and verify that the actual event count matches the expected count.
+Output includes:
+- **Unit Tests (15 total)**: Each synthetic/real test case, showing expected vs actual event count
+- **Functional Tests (2 total)**:
+  - `output_format_single_hit` - Validates MM:SS timestamp format on single hit
+  - `known_limitation_small_hits` - Validates partial detection (at least 2/3 hits) and format
+
+### Test Results Summary
+
+```
+======================================================================
+PHASE 2 TEST SUITE
+======================================================================
+
+Running 15 unit tests...
+[results for each test case]
+
+Running 2 functional tests...
+[format validation results]
+
+======================================================================
+TEST RESULTS SUMMARY
+======================================================================
+
+UNIT TESTS                               Expected     Actual       Result
+...
+
+FUNCTIONAL TESTS                         Result
+...
+
+======================================================================
+TOTAL: 17/17 tests passed
+======================================================================
+
+✓ All tests passed!
+```
 
 ## Algorithm Details
 
