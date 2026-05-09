@@ -6,11 +6,12 @@ The project will work entirely based on a gameplay recording. Using the health b
 
 # Phases
 
-The project will be broken up into three phases.
+The project will be broken up into five phases.
 - Phase 1: Extraction of the health bar pixel data from the video
 - Phase 2: Identification of the hit-data events from the video frames
 - Phase 3: Calculation and generation of the poise bar information
-- Phase 4: Conversion of the poise bar level into video overlay
+- Phase 4: Visualisation of the poise timeline as a graph
+- Phase 5: Conversion of the poise bar level into video overlay
 
 # Phase 1
 
@@ -46,6 +47,16 @@ With this information, the script must output, for each millisecond value, the c
 ```
 
 # Phase 4
+
+A script that reads the millisecond poise timeline from Phase 3 and plots it as a graph, giving a visual overview of poise changes throughout the boss battle.
+
+```bash
+python3 phase4-plot-poise.py poise_timeline.txt -o poise_graph.png
+```
+
+The graph shows poise over time with colour-coded zones (green/yellow/red), reference lines at 33% and 66% thresholds, and the annotated minimum poise point.
+
+# Phase 5
 The conversion of the millisecond poise calculation into a video overlay that will be shown on the video.
 The recommendation is that we use an image generation capability to create new transparent frames with the poise bar rendered onto each frame.
 
