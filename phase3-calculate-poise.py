@@ -7,6 +7,7 @@ Given:
 - Annotated hit data (timestamps and poise damage per hit)
 - Boss total poise
 - Boss poise regen rate and timer
+- Optional stagger window (how long poise stays at 0 before resetting)
 
 Calculate the poise level at every millisecond of the video.
 
@@ -15,6 +16,10 @@ Poise mechanics:
 2. After a hit, there's a delay (regen_timer) before poise starts recovering
 3. Poise recovers at regen_rate per second
 4. Multiple hits reset the regen timer
+5. If poise reaches 0, the boss is staggered:
+   - Poise stays at 0 for stagger_window seconds
+   - Hits during this window are ignored (boss is in stun animation)
+   - After the window, poise resets to max and the cycle restarts
 """
 
 import sys
@@ -50,7 +55,7 @@ def parse_annotated_hits(hits_file):
     return hits
 
 
-def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate):
+def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate, stagger_window_sec=0.0):
     """
     Calculate poise level for each millisecond of the video.
     
@@ -59,14 +64,16 @@ def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate):
         boss_poise: Maximum poise value
         regen_timer_sec: Time in seconds before regen starts after a hit
         regen_rate: Poise per second regeneration rate
+        stagger_window_sec: Seconds poise stays at 0 after a stagger before resetting.
+                            Hits during this window are ignored. 0 = disabled.
     
     Returns:
         List of (ms, poise_level) tuples for every millisecond
     """
     regen_timer_ms = int(regen_timer_sec * 1000)
-    regen_rate_per_ms = regen_rate / 1000.0  # Convert to poise per millisecond
+    regen_rate_per_ms = regen_rate / 1000.0
+    stagger_window_ms = int(stagger_window_sec * 1000)
     
-    # Find the end time of the video (last hit + buffer)
     if not hits:
         return [(0, boss_poise)]
     
@@ -74,28 +81,48 @@ def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate):
     
     poise = boss_poise
     last_hit_ms = -float('inf')
-    poise_at_last_hit = boss_poise  # Track poise value when hit occurred
+    poise_at_last_hit = boss_poise
     hit_index = 0
+    stagger_end_ms = None  # Set when poise hits 0; clears when stagger window expires
     
     timeline = []
     
     for ms in range(0, max_time + 1):
-        # Check if a new hit occurs at this millisecond
+        # --- Stagger window ---
+        if stagger_end_ms is not None:
+            if ms < stagger_end_ms:
+                # Inside stagger: ignore any hit at this ms, show poise at 0
+                if hit_index < len(hits) and hits[hit_index][0] == ms:
+                    hit_index += 1
+                timeline.append((ms, 0.0))
+                continue
+            else:
+                # Stagger window just expired: reset poise to full
+                poise = boss_poise
+                poise_at_last_hit = boss_poise
+                last_hit_ms = -float('inf')
+                stagger_end_ms = None
+                # Fall through — process any hit that lands exactly at this ms
+        
+        # --- Apply hit at this ms ---
         if hit_index < len(hits) and hits[hit_index][0] == ms:
             hit_time, damage = hits[hit_index]
-            poise = max(0, poise - damage)  # Clamp to 0
-            poise_at_last_hit = poise  # Remember poise level after the hit
+            poise = max(0.0, poise - damage)
+            poise_at_last_hit = poise
             last_hit_ms = ms
             hit_index += 1
+            
+            # Check for stagger
+            if poise <= 0.0 and stagger_window_ms > 0:
+                stagger_end_ms = ms + stagger_window_ms
+                timeline.append((ms, 0.0))
+                continue
         
-        # Check if poise should be regenerating (after delay)
+        # --- Regen ---
         time_since_hit_ms = ms - last_hit_ms
         if time_since_hit_ms >= regen_timer_ms:
-            # Calculate how much has been regenerated since regen started
             regen_duration_ms = time_since_hit_ms - regen_timer_ms
             regen_amount = regen_duration_ms * regen_rate_per_ms
-            
-            # Poise = hit_poise + regenerated_amount
             poise = min(boss_poise, poise_at_last_hit + regen_amount)
         
         timeline.append((ms, poise))
@@ -131,6 +158,9 @@ EXAMPLES:
                        help='Seconds to wait before poise regeneration starts (default: 3.85)')
     parser.add_argument('--regen-rate', type=float, required=True,
                        help='Poise per second regeneration rate (default: 13)')
+    parser.add_argument('--stagger-window', type=float, default=6.0,
+                       help='Seconds poise stays at 0 after stagger before resetting to max. '
+                            'Hits during this window are ignored. 0 = disabled (default: 6.0)')
     
     args = parser.parse_args()
     
@@ -154,8 +184,10 @@ EXAMPLES:
         print(f"  Boss poise: {args.boss_poise}", file=sys.stderr)
         print(f"  Regen timer: {args.regen_timer}s", file=sys.stderr)
         print(f"  Regen rate: {args.regen_rate} poise/sec", file=sys.stderr)
+        if args.stagger_window > 0:
+            print(f"  Stagger window: {args.stagger_window}s (hits ignored, poise=0 during window)", file=sys.stderr)
         
-        timeline = calculate_poise_timeline(hits, args.boss_poise, args.regen_timer, args.regen_rate)
+        timeline = calculate_poise_timeline(hits, args.boss_poise, args.regen_timer, args.regen_rate, args.stagger_window)
         
         # Write output
         write_poise_output(timeline, args.output)

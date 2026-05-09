@@ -21,6 +21,7 @@ REQUIRED OPTIONS:
 
 OPTIONAL:
   -o, --output FILE      Output video file (default: <video_stem>-overlay.mp4)
+  --stagger-window N     Seconds poise stays at 0 after stagger before resetting (default: 6.0)
   --fps N                Video frame rate (default: 30)
   --keep-timeline        Keep the intermediate poise timeline file
   --help                 Show this help
@@ -28,6 +29,10 @@ OPTIONAL:
 EXAMPLE:
   $(basename "$0") boss_fight-hits.txt boss_fight.mp4 \\
       --boss-poise 47 --regen-timer 3.85 --regen-rate 13
+
+  # With stagger reset modelling:
+  $(basename "$0") boss_fight-hits.txt boss_fight.mp4 \\
+      --boss-poise 120 --regen-timer 3.85 --regen-rate 13 --stagger-window 3.0
 EOF
 }
 
@@ -37,15 +42,17 @@ OUTPUT_FILE=""
 BOSS_POISE=""
 REGEN_TIMER=""
 REGEN_RATE=""
+STAGGER_WINDOW=""
 FPS=30
 KEEP_TIMELINE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --boss-poise)    BOSS_POISE="$2";   shift 2 ;;
-        --regen-timer)   REGEN_TIMER="$2";  shift 2 ;;
-        --regen-rate)    REGEN_RATE="$2";   shift 2 ;;
-        -o|--output)     OUTPUT_FILE="$2";  shift 2 ;;
+        --boss-poise)    BOSS_POISE="$2";      shift 2 ;;
+        --regen-timer)   REGEN_TIMER="$2";     shift 2 ;;
+        --regen-rate)    REGEN_RATE="$2";      shift 2 ;;
+        --stagger-window) STAGGER_WINDOW="$2"; shift 2 ;;
+        -o|--output)     OUTPUT_FILE="$2";     shift 2 ;;
         --fps)           FPS="$2";          shift 2 ;;
         --keep-timeline) KEEP_TIMELINE=true; shift ;;
         --help)          usage; exit 0 ;;
@@ -100,17 +107,15 @@ echo "Video       : $VIDEO_FILE"
 echo "Boss poise  : $BOSS_POISE"
 echo "Regen timer : ${REGEN_TIMER}s"
 echo "Regen rate  : $REGEN_RATE poise/s"
+[[ -n "$STAGGER_WINDOW" ]] && echo "Stagger win : ${STAGGER_WINDOW}s"
 echo "Output      : $OUTPUT_FILE"
 echo ""
 
 # ── Phase 3: calculate poise timeline ────────────────────────────────────────
 echo "▶ Phase 3: Calculating poise timeline…"
-python3 "$SCRIPT_DIR/phase3-calculate-poise.py" \
-    "$HITS_FILE" \
-    -o "$TIMELINE_FILE" \
-    --boss-poise "$BOSS_POISE" \
-    --regen-timer "$REGEN_TIMER" \
-    --regen-rate "$REGEN_RATE"
+PHASE3_ARGS=("$HITS_FILE" -o "$TIMELINE_FILE" --boss-poise "$BOSS_POISE" --regen-timer "$REGEN_TIMER" --regen-rate "$REGEN_RATE")
+[[ -n "$STAGGER_WINDOW" ]] && PHASE3_ARGS+=(--stagger-window "$STAGGER_WINDOW")
+python3 "$SCRIPT_DIR/phase3-calculate-poise.py" "${PHASE3_ARGS[@]}"
 echo ""
 
 # ── Phase 4: plot poise graph ─────────────────────────────────────────────────
