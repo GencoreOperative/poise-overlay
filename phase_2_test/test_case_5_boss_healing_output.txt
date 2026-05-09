@@ -1,5 +1,0 @@
-Damage Events: 1
-
-1. Frame   10: First hit: white marker appeared at x=800
-
-00:00

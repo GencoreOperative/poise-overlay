@@ -1,9 +1,0 @@
-Damage Events: 3
-
-1. Frame    5: First hit: white marker appeared at x=850
-2. Frame   10: Hit: white marker moved left by 150px (x=850→700)
-3. Frame   15: Hit: white marker moved left by 200px (x=700→500)
-
-00:00
-00:00
-00:00
