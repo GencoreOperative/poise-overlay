@@ -44,7 +44,6 @@ import sys
 import argparse
 from PIL import Image
 import numpy as np
-from collections import defaultdict
 
 
 def find_white_marker_position(frame_rgb):
@@ -130,9 +129,6 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
     if debug:
         print(f"Found {len(frames)} frames")
     
-    # Track states
-    states = []  # List of (frame_num, state)
-    positions = []  # List of (frame_num, white_marker_x or None)
     hits = []  # List of hit events
     
     state = 1  # State 1: Pre-Boss
@@ -191,7 +187,6 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                         print(f"Frame {idx}: STATE 2→3 (POST-INTERMISSION RESUME) - marker at x={white_pos}, no event")
                 else:
                     # White marker appeared for the first time — genuine first hit
-                    post_intermission = False
                     hits.append({
                         'frame': idx,
                         'type': 'first_hit',
@@ -281,6 +276,9 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                     # Bar and white both back — resume active combat silently
                     state = 3
                     prev_position = white_pos
+                    bar_right_s5 = bar_extent[1]
+                    if 0 < bar_right_s5 < white_pos and (white_pos - bar_right_s5) < 30:
+                        last_gap = white_pos - bar_right_s5
                     if debug:
                         print(f"Frame {idx}: STATE 5→3 (INTERMISSION CONFIRMED) - bar and marker back, prev={white_pos}")
                 else:
@@ -291,9 +289,6 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                     if debug:
                         print(f"Frame {idx}: STATE 5→2 (INTERMISSION CONFIRMED) - bar back, waiting for marker")
         
-        states.append((idx, state))
-        positions.append((idx, white_pos))
-    
     # If clip ended while monitoring (both bar and white gone and never returned),
     # commit the deferred final_hit — the boss was genuinely defeated.
     if state == 5 and pending_final_hit is not None:
@@ -301,7 +296,7 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
         if debug:
             print(f"Clip ended in STATE 5 — committing deferred final_hit at frame {pending_final_hit['frame']}")
     
-    return hits, states, positions
+    return hits
 
 
 def frame_to_mmss(frame_num, fps=30):
@@ -355,7 +350,7 @@ def main():
         sys.exit(1)
     
     try:
-        hits, states, positions = analyze_health_sequence(
+        hits = analyze_health_sequence(
             args.input_dir,
             max_frames=args.max_frames,
             debug=args.debug
@@ -364,13 +359,10 @@ def main():
         print(f"Error analyzing frames: {e}", file=sys.stderr)
         sys.exit(1)
     
-    # Count hits
-    hit_count = sum(1 for h in hits if h['type'] == 'hit')
-    first_count = sum(1 for h in hits if h['type'] == 'first_hit')
-    final_count = sum(1 for h in hits if h['type'] == 'final_hit')
-    damage_count = hit_count + first_count + final_count
-    
-    # Format output
+    damage_events = [h for h in hits if h['type'] in ('hit', 'first_hit', 'final_hit')]
+    hit_count = sum(1 for h in damage_events if h['type'] == 'hit')
+    first_count = sum(1 for h in damage_events if h['type'] == 'first_hit')
+    final_count = sum(1 for h in damage_events if h['type'] == 'final_hit')
     output = format_output(hits)
     
     # Write output
@@ -383,7 +375,7 @@ def main():
     # Summary
     if args.output:
         print(f"Results written to {args.output}")
-    print(f"\nSummary: {damage_count} total damage events ({first_count} first, {hit_count} mid, {final_count} final)")
+    print(f"\nSummary: {len(damage_events)} total damage events ({first_count} first, {hit_count} mid, {final_count} final)")
 
 
 if __name__ == '__main__':

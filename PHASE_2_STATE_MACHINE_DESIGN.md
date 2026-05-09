@@ -24,6 +24,8 @@ Each hit moves the white marker left. Healing moves it right. When the boss dies
 - Moving **right** = boss healed.
 - Any movement ≥ 3px is counted (threshold exists only to filter pixel noise, not to exclude small real hits).
 - When the boss **dies**, both the bar and the white marker disappear in the same frame (or within a few frames of each other).
+- After a hit, the game overlays a **yellow damage indicator** on the bar showing the amount of damage dealt. This tints the white marker yellow (blue channel drops to ~160–176). The detection threshold accounts for this: R > 180, G > 180, B > 140.
+- After a hit, Elden Ring overlays a **yellow damage indicator** on the bar showing how much damage was dealt. During this animation the white marker pixel values develop a yellow tint (blue channel drops to ~160–176). The detection threshold accounts for this: `R > 180, G > 180, B > 140`.
 
 ### Mid-Combat Clips
 
@@ -68,8 +70,11 @@ State 3: Active Combat
   ─────────────────────────────────────────────────
   White moves left  ≥ 3px   → Record "hit"
   White moves right ≥ 3px   → Record "heal"
-  White disappears,          → If bar_right dropped ≥ 10px from
-    bar still present           prev_position: Record "hit"
+  White disappears,          → If (bar_right − prev_position − gap) ≥ 10px:
+    bar still present           Record "hit" (gap = last known white_pos − bar_right,
+                                subtracted to exclude the structural offset between
+                                marker and bar edge; bar_right must be < prev_position
+                                and within 30px to be considered reliable)
   Both disappear             → State 5  (defer "final_hit")
 
 State 4: Defeated
