@@ -120,7 +120,7 @@ def frame_to_bytes(image):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Phase 4 Optimized: Create poise bar overlay and composite with video',
+        description='Phase 5: Create poise bar overlay and composite with video',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 EXAMPLES:
@@ -133,6 +133,8 @@ EXAMPLES:
     parser.add_argument('-o', '--output', required=True, help='Output video file')
     parser.add_argument('--video-file', required=True, help='Original video file for dimensions and compositing')
     parser.add_argument('--fps', type=int, default=30, help='Frame rate (default: 30)')
+    parser.add_argument('--max-poise', type=float, default=None,
+                        help='Maximum poise value for bar scaling (default: auto-detected from timeline)')
     
     args = parser.parse_args()
     
@@ -169,7 +171,8 @@ EXAMPLES:
         # Generate overlay frames and pipe to FFmpeg
         print(f"\nGenerating and piping {max_frames} overlay frames to FFmpeg...", file=sys.stderr)
         
-        max_poise = 47  # Gideon Offnir
+        max_poise = args.max_poise if args.max_poise is not None else max(timeline.values())
+        print(f"✓ Max poise: {max_poise:.1f}", file=sys.stderr)
         
         # Start FFmpeg process for overlay video creation (use MOV container for alpha)
         overlay_video_mov = Path(args.output).parent / f"{Path(args.output).stem}_overlay.mov"
