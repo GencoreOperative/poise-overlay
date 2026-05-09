@@ -152,15 +152,23 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
         if state == 1:  # Pre-Boss: Waiting for red bar
             if bar_present:
                 if white_present:
-                    # Bar and marker both already visible — clip started mid-combat.
-                    # Jump directly to active combat tracking without recording an event.
-                    state = 3
-                    prev_position = white_pos
                     bar_right_init = bar_extent[1]
-                    if 0 < bar_right_init < white_pos and (white_pos - bar_right_init) < 30:
-                        last_gap = white_pos - bar_right_init
-                    if debug:
-                        print(f"Frame {idx}: STATE 1→3 (MID-COMBAT START) - bar x={bar_extent[0]}–{bar_extent[1]}, marker x={white_pos}")
+                    marker_gap = white_pos - bar_right_init if white_pos > bar_right_init else 0
+                    if marker_gap > 30:
+                        # Marker is far outside the bar — false positive from scenery/UI.
+                        # Treat as bar-only appearance; wait for a genuine hit.
+                        state = 2
+                        if debug:
+                            print(f"Frame {idx}: STATE 1→2 (BAR APPEARED, spurious marker ignored at x={white_pos}, gap={marker_gap}px)")
+                    else:
+                        # Bar and marker both already visible — clip started mid-combat.
+                        # Jump directly to active combat tracking without recording an event.
+                        state = 3
+                        prev_position = white_pos
+                        if 0 < bar_right_init < white_pos and marker_gap < 30:
+                            last_gap = marker_gap
+                        if debug:
+                            print(f"Frame {idx}: STATE 1→3 (MID-COMBAT START) - bar x={bar_extent[0]}–{bar_extent[1]}, marker x={white_pos}")
                 else:
                     state = 2
                     if debug:
