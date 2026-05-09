@@ -60,15 +60,12 @@ def run_test_case(test_dir, phase2_script):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
-        # Parse event count from output file (v3 format: "Damage Events: N" on first line)
+        # Parse event count from output file — count MM:SS timestamp lines
         if os.path.exists(output_file):
             with open(output_file, 'r') as f:
-                first_line = f.readline().strip()
-                # Parse "Damage Events: N"
-                if first_line.startswith('Damage Events:'):
-                    actual_events = int(first_line.split(':')[1].strip())
-                else:
-                    actual_events = -1
+                lines = [l.strip() for l in f if l.strip()]
+            # Each non-empty line should be a MM:SS timestamp
+            actual_events = len(lines)
         else:
             actual_events = -1
         

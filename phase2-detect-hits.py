@@ -316,30 +316,9 @@ def frame_to_mmss(frame_num, fps=30):
 
 
 def format_output(hits):
-    """Format hits for display. Only output damage events (hits + first/final), not heals.
-    
-    Output format:
-      Line 1: "Damage Events: N"
-      Line 2: (blank)
-      Lines 3+: Detailed hit descriptions (for human review)
-      Final section: MM:SS timestamps (one per line, for processing)
-    """
-    # Count only damage events (first_hit, hit, final_hit), not heals
+    """Format hits as MM:SS timestamps, one per line. Only damage events, not heals."""
     damage_events = [h for h in hits if h['type'] in ('hit', 'first_hit', 'final_hit')]
-    
-    output = [f"Damage Events: {len(damage_events)}"]
-    output.append("")
-    
-    if damage_events:
-        for i, event in enumerate(damage_events, 1):
-            output.append(f"{i}. Frame {event['frame']:4d}: {event['description']}")
-    
-    # Add MM:SS timestamps for each hit (one per line)
-    output.append("")
-    for event in damage_events:
-        output.append(frame_to_mmss(event['frame']))
-    
-    return '\n'.join(output)
+    return '\n'.join(frame_to_mmss(e['frame']) for e in damage_events)
 
 
 def main():
@@ -367,23 +346,13 @@ def main():
         print(f"Error analyzing frames: {e}", file=sys.stderr)
         sys.exit(1)
     
-    damage_events = [h for h in hits if h['type'] in ('hit', 'first_hit', 'final_hit')]
-    hit_count = sum(1 for h in damage_events if h['type'] == 'hit')
-    first_count = sum(1 for h in damage_events if h['type'] == 'first_hit')
-    final_count = sum(1 for h in damage_events if h['type'] == 'final_hit')
     output = format_output(hits)
     
-    # Write output
     if args.output:
         with open(args.output, 'w') as f:
             f.write(output)
     else:
         print(output)
-    
-    # Summary
-    if args.output:
-        print(f"Results written to {args.output}")
-    print(f"\nSummary: {len(damage_events)} total damage events ({first_count} first, {hit_count} mid, {final_count} final)")
 
 
 if __name__ == '__main__':
