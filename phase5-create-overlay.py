@@ -191,8 +191,8 @@ EXAMPLES:
         overlay_proc = subprocess.Popen(
             ffmpeg_overlay_cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL,
+            stderr=None  # pass FFmpeg output directly to terminal
         )
         
         try:
@@ -223,8 +223,7 @@ EXAMPLES:
             overlay_proc.wait()
             
             if overlay_proc.returncode != 0:
-                stderr = overlay_proc.stderr.read().decode()
-                print(f"✗ Error creating overlay video: {stderr}", file=sys.stderr)
+                print(f"✗ Error creating overlay video (see FFmpeg output above)", file=sys.stderr)
                 sys.exit(1)
             
             print(f"✓ Created overlay video: {overlay_video_mov}", file=sys.stderr)
@@ -243,14 +242,14 @@ EXAMPLES:
             '-filter_complex', '[0:v][1:v]overlay=0:0[out]',
             '-map', '[out]', '-map', '0:a', '-c:a', 'aac',
             args.output
-        ], capture_output=True, text=True)
+        ], stdout=subprocess.DEVNULL)
         
         if result.returncode != 0:
-            print(f"✗ Error compositing video: {result.stderr}", file=sys.stderr)
+            print(f"✗ Error compositing video (see FFmpeg output above)", file=sys.stderr)
             sys.exit(1)
         
         print(f"✓ Composited video saved to: {args.output}", file=sys.stderr)
-        print("\n✓ Phase 4 complete!", file=sys.stderr)
+        print("\n✓ Phase 5 complete!", file=sys.stderr)
         
     except Exception as e:
         print(f"✗ Error: {e}", file=sys.stderr)
