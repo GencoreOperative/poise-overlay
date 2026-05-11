@@ -3,12 +3,15 @@
 Test runner for Phase 2 hit detection.
 Validates that the detection algorithm works correctly on all test cases.
 Includes both unit tests (accuracy) and functional tests (output format).
+
+Usage:
+    python3 run_tests.py           # Normal run
+    python3 run_tests.py --debug   # On failure: re-run with phase2 --debug for full frame trace
 """
 
 import os
 import sys
 import subprocess
-import json
 import re
 
 def run_test_case(test_dir, phase2_script):
@@ -48,36 +51,20 @@ def run_test_case(test_dir, phase2_script):
     
     expected_events = expected_map.get(test_name, -1)
     
-    # Run phase2 detection
-    output_file = f"{test_name}_output.txt"
-    cmd = [
-        'python3',
-        phase2_script,
-        test_dir,
-        '-o',
-        output_file
-    ]
+    # Run phase2 detection, capturing stdout directly — no output file written
+    cmd = ['python3', phase2_script, test_dir]
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
-        # Parse event count from output file — count MM:SS.mmm timestamp lines
-        if os.path.exists(output_file):
-            with open(output_file, 'r') as f:
-                lines = [l.strip() for l in f if l.strip()]
-            # Each non-empty line should be a MM:SS timestamp
-            actual_events = len(lines)
-        else:
-            actual_events = -1
-        
+        lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        actual_events = len(lines)
         passed = (actual_events == expected_events)
-        
-        return test_name, expected_events, actual_events, passed, result.stderr
+        return test_name, expected_events, actual_events, passed, result.stdout, result.stderr
     
     except subprocess.TimeoutExpired:
-        return test_name, expected_events, -1, False, "TIMEOUT"
+        return test_name, expected_events, -1, False, '', "TIMEOUT"
     except Exception as e:
-        return test_name, expected_events, -1, False, str(e)
+        return test_name, expected_events, -1, False, '', str(e)
 
 
 def validate_mmss_format(line):
@@ -95,31 +82,19 @@ def run_functional_test_output_format(phase2_script):
     """
     test_case = 'test_case_3_single_damage'
     
-    # Run phase 2
-    cmd = ['python3', phase2_script, test_case, '-o', f'{test_case}_functional_output.txt']
+    # Run phase 2, capturing stdout directly — no output file written
+    cmd = ['python3', phase2_script, test_case]
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        output_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
         
-        # Read output file
-        output_file = f'{test_case}_functional_output.txt'
-        if not os.path.exists(output_file):
-            return 'output_format_single_hit', False, 'No output file generated'
+        # Extract MM:SS timestamps
+        timestamps = [l.strip() for l in output_lines if validate_mmss_format(l)]
         
-        with open(output_file, 'r') as f:
-            output_lines = f.read().strip().split('\n')
-        
-        # Extract MM:SS timestamps (skip header/description lines)
-        timestamps = []
-        for line in output_lines:
-            if validate_mmss_format(line):
-                timestamps.append(line.strip())
-        
-        # Verify at least one timestamp was found
         if not timestamps:
             return 'output_format_single_hit', False, 'No MM:SS timestamps found in output'
         
-        # Verify all timestamps are valid MM:SS
         for ts in timestamps:
             if not validate_mmss_format(ts):
                 return 'output_format_single_hit', False, f'Invalid timestamp format: {ts}'
@@ -148,30 +123,17 @@ def run_functional_test_known_limitation_small_hits(phase2_script):
     """
     test_case = 'test_case_4_multiple_damages'
     
-    cmd = ['python3', phase2_script, test_case, '-o', f'{test_case}_functional_output.txt']
+    cmd = ['python3', phase2_script, test_case]
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        output_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
         
-        # Read output file
-        output_file = f'{test_case}_functional_output.txt'
-        if not os.path.exists(output_file):
-            return 'known_limitation_small_hits', False, 'No output file generated'
+        timestamps = [l.strip() for l in output_lines if validate_mmss_format(l)]
         
-        with open(output_file, 'r') as f:
-            output_lines = f.read().strip().split('\n')
-        
-        # Extract MM:SS timestamps (skip header/description lines)
-        timestamps = []
-        for line in output_lines:
-            if validate_mmss_format(line):
-                timestamps.append(line.strip())
-        
-        # Known limitation: should detect at least 2 hits (out of 3 possible)
         if len(timestamps) < 2:
             return 'known_limitation_small_hits', False, f'Expected at least 2 hits, got {len(timestamps)}'
         
-        # Verify all are valid MM:SS
         for ts in timestamps:
             if not validate_mmss_format(ts):
                 return 'known_limitation_small_hits', False, f'Invalid timestamp format: {ts}'
@@ -184,7 +146,16 @@ def run_functional_test_known_limitation_small_hits(phase2_script):
         return 'known_limitation_small_hits', False, str(e)
 
 
+def run_debug_trace(test_dir, phase2_script):
+    """Re-run a failing test case with --debug for full frame-by-frame trace."""
+    cmd = ['python3', phase2_script, test_dir, '--debug']
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return result.stdout  # phase2 --debug writes trace to stdout
+
+
 def main():
+    debug_mode = '--debug' in sys.argv
+
     # Determine paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
@@ -216,13 +187,23 @@ def main():
     results = []
     for test_dir in test_dirs:
         print(f"Testing {test_dir}...", end=' ', flush=True)
-        name, expected, actual, passed, stderr = run_test_case(test_dir, phase2_script)
+        name, expected, actual, passed, stdout, stderr = run_test_case(test_dir, phase2_script)
         results.append((name, expected, actual, passed))
         
         if passed:
             print(f"✓ PASS (expected {expected}, got {actual})")
         else:
             print(f"✗ FAIL (expected {expected}, got {actual})")
+            detected = [l.strip() for l in stdout.splitlines() if l.strip()]
+            if detected:
+                print(f"  Detected timestamps: {', '.join(detected)}")
+            else:
+                print(f"  Detected timestamps: (none)")
+            if debug_mode:
+                print(f"  --- DEBUG TRACE ---")
+                trace = run_debug_trace(test_dir, phase2_script)
+                print(trace)
+                print(f"  --- END TRACE ---")
     
     # Functional Tests
     print(f"\nRunning 2 functional tests...\n")
