@@ -131,11 +131,32 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
     
     hits = []  # List of hit events
     
+    # Minimum consecutive stable frames required in State 2 before accepting a FIRST_HIT.
+    # The health bar appears in a single frame and does not animate in. However, the crop area
+    # extends beyond the UI bar, and gameplay footage visible to the right can contain red pixels.
+    # These spurious pixels inflate bar_right far beyond the actual bar boundary. When they
+    # disappear, bar_right snaps back to the true value (~5 frames = ~167ms at 30fps of spikes).
+    # Mid-combat clip starts don't need this — the bar has been stable since before the clip began.
+    MIN_STABLE_FRAMES = 5
+    MIN_STABLE_FRAMES_MID_COMBAT = 1
+    # Minimum frames since the last large bar_right spike before accepting a FIRST_HIT.
+    # When gameplay red pixels inflate bar_right, then vanish, bar_right "increases" sharply as
+    # the spurious pixels appear, then drops back to the true value. The white marker at the end
+    # of the fixed-width health bar can then appear within 30px of the true bar_right — giving a
+    # false first-hit signal. This guard requires 37 spike-free frames before firing.
+    # 37 was chosen because the longest observed false-positive quiet window was 36 frames.
+    MIN_QUIET_FRAMES = 37
+
     state = 1  # State 1: Pre-Boss
     prev_position = None
     last_gap = None            # Structural gap (white_pos - bar_right) when both visible
     pending_final_hit = None   # Deferred final_hit pending intermission confirmation
     post_intermission = False  # True when returning to State 2 after a phase transition
+    mid_combat_start = False   # True when clip appears to have started mid-combat (no event on first marker)
+    bar_stable_count = 0       # Consecutive frames where bar right edge hasn't moved much
+    prev_bar_right_s2 = None   # Bar right edge from previous frame while in State 2
+    marker_in_range_count_s2 = 0  # Consecutive frames where marker is within 30px of bar right edge
+    last_increase_frame = -1000   # Frame index of the last large bar_right spike from spurious gameplay pixels
     
     for idx, frame_file in enumerate(frames):
         frame_path = os.path.join(frame_dir, frame_file)
@@ -151,26 +172,32 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
         # State transitions and event detection
         if state == 1:  # Pre-Boss: Waiting for red bar
             if bar_present:
+                bar_right_init = bar_extent[1]
                 if white_present:
-                    bar_right_init = bar_extent[1]
-                    marker_gap = white_pos - bar_right_init if white_pos > bar_right_init else 0
-                    if marker_gap > 30:
-                        # Marker is far outside the bar — false positive from scenery/UI.
-                        # Treat as bar-only appearance; wait for a genuine hit.
+                    marker_gap = white_pos - bar_right_init  # Signed: positive = beyond bar, negative = inside bar
+                    if abs(marker_gap) > 30:
+                        # Marker is far from bar's right edge (either deep inside or well outside) — spurious.
                         state = 2
+                        bar_stable_count = 0
+                        prev_bar_right_s2 = bar_right_init
+                        marker_in_range_count_s2 = 0
                         if debug:
-                            print(f"Frame {idx}: STATE 1→2 (BAR APPEARED, spurious marker ignored at x={white_pos}, gap={marker_gap}px)")
+                            print(f"Frame {idx}: STATE 1→2 (BAR APPEARED, spurious marker ignored at x={white_pos}, gap={marker_gap:+d}px)")
                     else:
-                        # Bar and marker both already visible — clip started mid-combat.
-                        # Jump directly to active combat tracking without recording an event.
-                        state = 3
-                        prev_position = white_pos
-                        if 0 < bar_right_init < white_pos and marker_gap < 30:
-                            last_gap = marker_gap
+                        # Marker is within 30px of bar's right edge — genuine mid-combat clip start.
+                        # Route through State 2 stability check; suppress the first_hit event.
+                        state = 2
+                        mid_combat_start = True
+                        bar_stable_count = 0
+                        prev_bar_right_s2 = bar_right_init
+                        marker_in_range_count_s2 = 1  # Already in range on entry
                         if debug:
-                            print(f"Frame {idx}: STATE 1→3 (MID-COMBAT START) - bar x={bar_extent[0]}–{bar_extent[1]}, marker x={white_pos}")
+                            print(f"Frame {idx}: STATE 1→2 (BAR+MARKER, routing via stability check) - bar x={bar_extent[0]}–{bar_right_init}, marker x={white_pos}")
                 else:
                     state = 2
+                    bar_stable_count = 0
+                    prev_bar_right_s2 = bar_extent[1]
+                    marker_in_range_count_s2 = 0
                     if debug:
                         print(f"Frame {idx}: STATE 1→2 (BAR APPEARED) - red bar x={bar_extent[0]}–{bar_extent[1]}")
         
@@ -179,31 +206,85 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                 # Bar vanished before any hit — back to pre-boss
                 state = 1
                 post_intermission = False
+                mid_combat_start = False
+                bar_stable_count = 0
+                prev_bar_right_s2 = None
+                marker_in_range_count_s2 = 0
+                last_increase_frame = -1000
                 if debug:
                     print(f"Frame {idx}: STATE 2→1 (BAR VANISHED, no hits)")
-            elif white_present:
-                state = 3
-                prev_position = white_pos
-                if bar_extent:
-                    bar_right_s2 = bar_extent[1]
-                    if 0 < bar_right_s2 < white_pos and (white_pos - bar_right_s2) < 30:
-                        last_gap = white_pos - bar_right_s2
-                if post_intermission:
-                    # White reappeared after intermission — resume silently, no event
-                    post_intermission = False
+            else:
+                # Update bar stability tracking.
+                # Only reset on INCREASE: gameplay red pixels to the right of the health bar
+                # inflate bar_right when they appear. When they vanish, bar_right snaps back
+                # to the true bar boundary. Damage shrinks the bar — that must not reset stability.
+                bar_right_s2 = bar_extent[1]
+                if prev_bar_right_s2 is not None and (bar_right_s2 - prev_bar_right_s2) > 50:
+                    # bar_right spiked upward — spurious gameplay pixels inflating the detection
+                    bar_stable_count = 0
+                    marker_in_range_count_s2 = 0
+                    last_increase_frame = idx
                     if debug:
-                        print(f"Frame {idx}: STATE 2→3 (POST-INTERMISSION RESUME) - marker at x={white_pos}, no event")
+                        print(f"Frame {idx}: STATE 2 (bar still entering, right edge {prev_bar_right_s2}→{bar_right_s2}, stable_count reset)")
                 else:
-                    # White marker appeared for the first time — genuine first hit
-                    hits.append({
-                        'frame': idx,
-                        'type': 'first_hit',
-                        'position': white_pos,
-                        'pixel_change': None,
-                        'description': f'First hit: white marker appeared at x={white_pos}'
-                    })
-                    if debug:
-                        print(f"Frame {idx}: STATE 2→3 (FIRST HIT) - white marker at x={white_pos}")
+                    bar_stable_count += 1
+                prev_bar_right_s2 = bar_right_s2
+
+                stable_threshold = MIN_STABLE_FRAMES_MID_COMBAT if mid_combat_start else MIN_STABLE_FRAMES
+
+                if white_present:
+                    marker_gap_s2 = white_pos - bar_right_s2  # Signed gap
+                    if abs(marker_gap_s2) > 30:
+                        # Marker is far from bar's right edge — spurious pixel / false positive.
+                        marker_in_range_count_s2 = 0
+                        if debug:
+                            print(f"Frame {idx}: STATE 2 (spurious marker at x={white_pos}, gap={marker_gap_s2}px, staying)")
+                    elif bar_stable_count < stable_threshold:
+                        # Bar not yet stable — spurious pixel spikes may still be occurring.
+                        marker_in_range_count_s2 += 1
+                        if debug:
+                            print(f"Frame {idx}: STATE 2 (bar not yet stable, count={bar_stable_count}/{stable_threshold}, ignoring marker at x={white_pos})")
+                    else:
+                        marker_in_range_count_s2 += 1
+                        quiet_frames = idx - last_increase_frame
+                        if marker_in_range_count_s2 < 2:
+                            # Require 2 consecutive in-range frames before accepting — prevents
+                            # false positives where bar briefly overlaps a static UI element.
+                            if debug:
+                                print(f"Frame {idx}: STATE 2 (marker in range but awaiting confirmation, count={marker_in_range_count_s2})")
+                        elif quiet_frames < MIN_QUIET_FRAMES:
+                            # A bar_right spike occurred recently — gameplay pixels may still be
+                            # causing intermittent inflation. Require MIN_QUIET_FRAMES spike-free
+                            # frames before firing a first_hit.
+                            if debug:
+                                print(f"Frame {idx}: STATE 2 (marker confirmed but oscillation {quiet_frames}/{MIN_QUIET_FRAMES} frames ago, waiting)")
+                        else:
+                            state = 3
+                            prev_position = white_pos
+                            if 0 < bar_right_s2 < white_pos:
+                                last_gap = marker_gap_s2
+                            bar_stable_count = 0
+                            prev_bar_right_s2 = None
+                            marker_in_range_count_s2 = 0
+                            if post_intermission or mid_combat_start:
+                                # Resuming after intermission, or clip started mid-combat — no event
+                                post_intermission = False
+                                mid_combat_start = False
+                                if debug:
+                                    print(f"Frame {idx}: STATE 2→3 (RESUME, no event) - marker at x={white_pos}")
+                            else:
+                                # White marker appeared for the first time — genuine first hit
+                                hits.append({
+                                    'frame': idx,
+                                    'type': 'first_hit',
+                                    'position': white_pos,
+                                    'pixel_change': None,
+                                    'description': f'First hit: white marker appeared at x={white_pos}'
+                                })
+                                if debug:
+                                    print(f"Frame {idx}: STATE 2→3 (FIRST HIT) - white marker at x={white_pos}")
+                else:
+                    marker_in_range_count_s2 = 0
         
         elif state == 3:  # Active Combat: Track white marker movement
             if not bar_present and not white_present:
@@ -294,6 +375,8 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
                     state = 2
                     post_intermission = True
                     prev_position = None
+                    bar_stable_count = 0
+                    prev_bar_right_s2 = bar_extent[1]
                     if debug:
                         print(f"Frame {idx}: STATE 5→2 (INTERMISSION CONFIRMED) - bar back, waiting for marker")
         

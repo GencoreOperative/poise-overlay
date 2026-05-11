@@ -144,6 +144,8 @@ python3 phase5-create-overlay.py poise_timeline.txt \
 
 **Recommended Script:** `phase2-detect-hits-v2-white-strip.py`
 
+> For a detailed description of the hit detection algorithm — including the state machine, all transition guards, and the reasoning behind constants such as `MIN_QUIET_FRAMES` — see [`PHASE_2_STATE_MACHINE_DESIGN.md`](PHASE_2_STATE_MACHINE_DESIGN.md).
+
 **Algorithm:**
 - Detect white/red pixel boundary in health bar (rightmost edge)
 - Track boundary position per frame

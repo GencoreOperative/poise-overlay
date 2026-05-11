@@ -16,6 +16,15 @@ Each hit moves the white marker left. Healing moves it right. When the boss dies
 - When the bar first appears, there is **no white marker** — the boss is at full health.
 - The white marker only appears when the boss **takes its first hit**.
 - The bar always starts at the **left edge** of the cropped frame (x ≤ 10). Pre-boss UI elements that happen to contain red pixels appear further right and must be ignored.
+- The bar is **fixed width** for the duration of the fight (it does not shrink as the boss loses health; the white marker moves left instead).
+
+### Spurious bar_right Inflation
+
+The Phase 2 crop covers a strip slightly wider than the health bar UI element. Gameplay footage is visible to the right of the bar in this strip. That gameplay footage can contain red pixels, which cause the rightmost-red-pixel detection (`bar_right`) to report a value far beyond the actual bar boundary.
+
+This appears as `bar_right` spiking from the true bar edge (~305) to values like 500–800+, then snapping back when those gameplay pixels change. The white marker's position (`white_pos`) is unaffected — it sits at the fixed right end of the actual health bar and does not move during these spikes.
+
+The algorithm guards against false first-hit detections caused by this spike pattern using `MIN_STABLE_FRAMES` and `MIN_QUIET_FRAMES` (see State 2 below).
 
 ### The White Marker
 
@@ -25,7 +34,6 @@ Each hit moves the white marker left. Healing moves it right. When the boss dies
 - Any movement ≥ 3px is counted (threshold exists only to filter pixel noise, not to exclude small real hits).
 - When the boss **dies**, both the bar and the white marker disappear in the same frame (or within a few frames of each other).
 - After a hit, the game overlays a **yellow damage indicator** on the bar showing the amount of damage dealt. This tints the white marker yellow (blue channel drops to ~160–176). The detection threshold accounts for this: R > 180, G > 180, B > 140.
-- After a hit, Elden Ring overlays a **yellow damage indicator** on the bar showing how much damage was dealt. During this animation the white marker pixel values develop a yellow tint (blue channel drops to ~160–176). The detection threshold accounts for this: `R > 180, G > 180, B > 140`.
 
 ### Mid-Combat Clips
 
@@ -53,17 +61,31 @@ State 1: Pre-Boss
   Ignore all white pixel detections.
   ─────────────────────────────────────────────────
   Bar appears, no white     → State 2  (no event)
-  Bar appears WITH white    → State 3  (no event — mid-combat clip start,
-                                        set prev_position = white_pos)
+  Bar appears WITH white    → State 2  (no event — mid_combat_start=True;
+                                        State 2→3 transition fires immediately
+                                        with no event, establishing baseline)
 
 State 2: Bar Present, Not Yet Hit
-  Bar present, white absent.
+  Bar present, white absent (or white present but not yet confirmed as genuine).
   Boss is at full health, or bar has returned after an intermission.
+  Guards must all pass before transitioning to State 3:
+    1. bar_stable_count ≥ MIN_STABLE_FRAMES (5 frames; or 1 for mid-combat start)
+       Waits for bar_right to stop spiking from spurious gameplay red pixels.
+    2. marker_in_range_count ≥ 2
+       Requires the white marker to be within 30px of bar_right for 2 consecutive
+       frames. Uses abs(gap) ≤ 30 (bidirectional) so a marker deep inside the bar
+       (large negative gap) is also rejected.
+    3. quiet_frames ≥ MIN_QUIET_FRAMES (37)
+       Frames since the last large bar_right spike (>50px increase). Prevents
+       firing during intermittent spike patterns in gameplay-footage red pixels.
+       Mid-combat clip starts initialise last_increase_frame = -1000 so their
+       quiet period is effectively infinite and this guard always passes.
   ─────────────────────────────────────────────────
   Bar disappears            → State 1  (no event)
-  White appears (genuine)   → State 3  + Record "first_hit"
-  White appears (post-      → State 3  (no event — resume silently,
-    intermission)                       set prev_position = white_pos)
+  White confirmed (genuine) → State 3  + Record "first_hit"
+  White confirmed (post-    → State 3  (no event — resume silently,
+    intermission or mid-                set prev_position = white_pos)
+    combat start)
 
 State 3: Active Combat
   Bar present, tracking white marker position.
@@ -121,7 +143,8 @@ Clip ends:      Bar never returned                   State 5 → 4  final_hit co
 ### Mid-combat clip (clip starts after first hit already occurred)
 
 ```
-Frame 0:        Bar present, white at x=830          State 1 → 3  (no event, prev=830)
+Frame 0:        Bar present, white at x=830          State 1 → 2  (mid_combat_start=True)
+                                                      State 2 → 3  (no event, prev=830)
 Frame 12:       White moves 830 → 772                State 3       hit (-58px)
 Clip ends.
 ```
@@ -146,16 +169,13 @@ Clip ends.      Total: 1 hit
 
 ## Output Format
 
+One timestamp per hit event (`first_hit`, `hit`, `final_hit`), bare `MM:SS.mmm` format, one per line:
+
 ```
-Damage Events: N
-
-1. Frame XXX: [description]
-2. Frame XXX: [description]
-...
-
-MM:SS
-MM:SS
+00:23.400
+00:53.100
+01:12.733
 ```
 
-Only damage events are counted and listed (`first_hit`, `hit`, `final_hit`). Heals are tracked internally but excluded from output.
+Heals are tracked internally but excluded from output.
 
