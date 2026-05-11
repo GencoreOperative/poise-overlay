@@ -28,7 +28,10 @@ from pathlib import Path
 
 
 def parse_annotated_hits(hits_file):
-    """Parse annotated hits file with format: MM:SS,poise_damage"""
+    """Parse annotated hits file with format: MM:SS.mmm,poise_damage
+    
+    Also accepts legacy MM:SS format for backward compatibility.
+    """
     hits = []
     with open(hits_file, 'r') as f:
         for line in f:
@@ -38,7 +41,7 @@ def parse_annotated_hits(hits_file):
             
             parts = line.split(',')
             if len(parts) != 2:
-                raise ValueError(f"Invalid line format: {line} (expected MM:SS,damage)")
+                raise ValueError(f"Invalid line format: {line} (expected MM:SS.mmm,damage)")
             
             timestamp = parts[0].strip()
             try:
@@ -46,11 +49,17 @@ def parse_annotated_hits(hits_file):
             except ValueError:
                 raise ValueError(f"Invalid poise damage value: {parts[1]}")
             
-            # Convert MM:SS to milliseconds
-            mm, ss = map(int, timestamp.split(':'))
-            ms = mm * 60 * 1000 + ss * 1000
+            # Convert MM:SS.mmm (or legacy MM:SS) to milliseconds
+            if '.' in timestamp:
+                time_part, ms_str = timestamp.split('.', 1)
+                mm, ss = map(int, time_part.split(':'))
+                millis = int(ms_str.ljust(3, '0')[:3])
+            else:
+                mm, ss = map(int, timestamp.split(':'))
+                millis = 0
+            ms = mm * 60 * 1000 + ss * 1000 + millis
             
-            hits.append((ms, poise_damage))
+            hits.append((ms, poise_damage, timestamp))
     
     return hits
 
@@ -77,7 +86,7 @@ def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate, stag
     if not hits:
         return [(0, boss_poise)]
     
-    max_time = max(ts for ts, _ in hits) + 10000  # Add 10 seconds buffer
+    max_time = max(ts for ts, _, _ts in hits) + 10000  # Add 10 seconds buffer
     
     poise = boss_poise
     last_hit_ms = -float('inf')
@@ -106,7 +115,7 @@ def calculate_poise_timeline(hits, boss_poise, regen_timer_sec, regen_rate, stag
         
         # --- Apply hit at this ms ---
         if hit_index < len(hits) and hits[hit_index][0] == ms:
-            hit_time, damage = hits[hit_index]
+            hit_time, damage, _ts = hits[hit_index]
             poise = max(0.0, poise - damage)
             poise_at_last_hit = poise
             last_hit_ms = ms
@@ -174,10 +183,8 @@ EXAMPLES:
             sys.exit(1)
         
         print(f"✓ Parsed {len(hits)} hits", file=sys.stderr)
-        for ms, damage in hits:
-            mm = ms // 60000
-            ss = (ms % 60000) // 1000
-            print(f"  {mm:02d}:{ss:02d} - {damage:.1f} poise damage", file=sys.stderr)
+        for ms, damage, timestamp in hits:
+            print(f"  {timestamp} - {damage:.1f} poise damage", file=sys.stderr)
         
         # Calculate poise timeline
         print(f"\nCalculating poise timeline...", file=sys.stderr)

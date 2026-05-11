@@ -60,7 +60,7 @@ def run_test_case(test_dir, phase2_script):
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
-        # Parse event count from output file — count MM:SS timestamp lines
+        # Parse event count from output file — count MM:SS.mmm timestamp lines
         if os.path.exists(output_file):
             with open(output_file, 'r') as f:
                 lines = [l.strip() for l in f if l.strip()]
@@ -80,8 +80,8 @@ def run_test_case(test_dir, phase2_script):
 
 
 def validate_mmss_format(line):
-    """Check if line matches MM:SS format"""
-    return re.match(r'^\d{2}:\d{2}$', line.strip()) is not None
+    """Check if line matches MM:SS.mmm format"""
+    return re.match(r'^\d{2}:\d{2}\.\d{3}$', line.strip()) is not None
 
 
 def run_functional_test_output_format(phase2_script):

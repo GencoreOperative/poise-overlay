@@ -307,18 +307,19 @@ def analyze_health_sequence(frame_dir, max_frames=None, debug=False):
     return hits
 
 
-def frame_to_mmss(frame_num, fps=30):
-    """Convert frame number to MM:SS format at given frame rate."""
-    seconds = frame_num / fps
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    return f"{minutes:02d}:{secs:02d}"
+def frame_to_timestamp(frame_num, fps=30):
+    """Convert frame number to MM:SS.mmm format at given frame rate."""
+    total_ms = round(frame_num * 1000 / fps)
+    minutes = total_ms // 60000
+    seconds = (total_ms % 60000) // 1000
+    millis = total_ms % 1000
+    return f"{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
 def format_output(hits):
-    """Format hits as MM:SS timestamps, one per line. Only damage events, not heals."""
+    """Format hits as MM:SS.mmm timestamps, one per line. Only damage events, not heals."""
     damage_events = [h for h in hits if h['type'] in ('hit', 'first_hit', 'final_hit')]
-    return '\n'.join(frame_to_mmss(e['frame']) for e in damage_events)
+    return '\n'.join(frame_to_timestamp(e['frame']) for e in damage_events)
 
 
 def main():
