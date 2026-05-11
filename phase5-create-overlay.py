@@ -249,6 +249,9 @@ EXAMPLES:
             sys.exit(1)
         
         print(f"✓ Composited video saved to: {args.output}", file=sys.stderr)
+        
+        overlay_video_mov.unlink()
+        print(f"✓ Cleaned up temporary overlay: {overlay_video_mov}", file=sys.stderr)
         print("\n✓ Phase 5 complete!", file=sys.stderr)
         
     except Exception as e:
