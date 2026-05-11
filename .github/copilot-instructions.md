@@ -6,6 +6,20 @@
 
 ## Quick Reference: Critical Commands
 
+### ⚠️ Frame Extraction — ALWAYS Use the Project Script
+**Never use raw `ffmpeg` with hardcoded crop coordinates.** The crop region varies by recording setup.
+Always use `phase1-extract-health-bar.sh` which has the correct defaults:
+
+```bash
+# Standard extraction (uses correct default crop: x=465, y=873, w=999, h=7)
+bash phase1-extract-health-bar.sh -o <output_dir> <video_file>
+
+# With custom crop if needed
+bash phase1-extract-health-bar.sh -x 465 -y 873 -w 999 -h 7 -o <output_dir> <video_file>
+```
+
+This applies to ALL frame extraction: debugging, investigation, testing, re-running analysis.
+
 ### Test Suite (Phase 2 validation)
 ```bash
 cd phase_2_test/
